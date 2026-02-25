@@ -5,11 +5,12 @@ Description: Yellow Card Backend Test - Transaction Service (SAM + LocalStack)
 Globals:
   Function:
     Runtime: nodejs20.x
-    Timeout: 10
+    Timeout: 30
     MemorySize: 256
     Environment:
       Variables:
         TABLE_NAME: !Ref TransactionsTable
+        QUEUE_URL: !Ref TransactionQueue
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
 
 Resources:
@@ -31,10 +32,34 @@ Resources:
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
+        - AttributeName: reference
+          AttributeType: S
       KeySchema:
         - AttributeName: id
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ReferenceIndex
+          KeySchema:
+            - AttributeName: reference
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
 
+  TransactionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: transaction-processing-queue
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 86400
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt TransactionDLQ.Arn
+        maxReceiveCount: 3
+
+  TransactionDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: transaction-processing-dlq
+      MessageRetentionPeriod: 1209600
 
   HealthCheckFunction:
     Type: AWS::Serverless::Function
@@ -45,9 +70,9 @@ Resources:
         Target: es2022
         Sourcemap: true
         EntryPoints:
-          - src/healthCheck.ts
+          - src/handlers/healthCheck/handler.ts
     Properties:
-      Handler: healthCheck.handler
+      Handler: handler.handler
       Events:
         Health:
           Type: Api
@@ -56,8 +81,81 @@ Resources:
             Path: /health
             Method: GET
 
+  CreateTransactionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/createTransaction/handler.ts
+    Properties:
+      Handler: handler.handler
+      Events:
+        Create:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /transactions
+            Method: POST
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TransactionsTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TransactionQueue.QueueName
+
+  GetTransactionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/getTransaction/handler.ts
+    Properties:
+      Handler: handler.handler
+      Events:
+        Get:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /transactions/{id}
+            Method: GET
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TransactionsTable
+
+  ProcessTransactionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/processTransaction/handler.ts
+    Properties:
+      Handler: handler.handler
+      Timeout: 60
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt TransactionQueue.Arn
+            BatchSize: 1
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TransactionsTable
 
 Outputs:
   ApiBaseUrl:
     Description: Base URL of the API Gateway endpoint
     Value: !Sub "http://localhost:4566/restapis/${Api}/local/_user_request_"
+  QueueUrl:
+    Description: URL of the SQS Queue
+    Value: !Ref TransactionQueue
