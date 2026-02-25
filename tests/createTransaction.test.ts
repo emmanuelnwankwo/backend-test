@@ -1,26 +1,24 @@
+import { jest } from '@jest/globals';
 import { handler as createHandler } from "../src/handlers/createTransaction/handler";
 import { TransactionStatus, ErrorType } from "../src/shared/types";
 import { ddbDoc, sqsClient } from "../src/shared/clients";
 
-jest.mock("../src/shared/clients", () => ({
-  ddbDoc: {
-    send: jest.fn(),
-  },
-  sqsClient: {
-    send: jest.fn(),
-  },
-}));
+type AnyMock = jest.Mock<any>;
+
 
 describe("CreateTransaction Handler", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // override real clients' send methods with mocks
+    (ddbDoc.send as AnyMock) = jest.fn();
+    (sqsClient.send as AnyMock) = jest.fn();
   });
 
   test("creates transaction successfully", async () => {
-    (ddbDoc.send as jest.Mock)
+    (ddbDoc.send as AnyMock)
       .mockResolvedValueOnce({ Items: [] }) // QueryCommand - no duplicate
       .mockResolvedValueOnce({}); // PutCommand
-    (sqsClient.send as jest.Mock).mockResolvedValueOnce({});
+    (sqsClient.send as AnyMock).mockResolvedValueOnce({});
 
     const event = {
       body: JSON.stringify({
@@ -58,7 +56,7 @@ describe("CreateTransaction Handler", () => {
   });
 
   test("returns 409 for duplicate reference", async () => {
-    (ddbDoc.send as jest.Mock).mockResolvedValueOnce({
+    (ddbDoc.send as AnyMock).mockResolvedValueOnce({
       Items: [{ id: "existing-id", reference: "INV-001" }],
     });
 
@@ -78,7 +76,7 @@ describe("CreateTransaction Handler", () => {
   });
 
   test("returns 409 for conditional check failure", async () => {
-    (ddbDoc.send as jest.Mock)
+    (ddbDoc.send as AnyMock)
       .mockResolvedValueOnce({ Items: [] })
       .mockRejectedValueOnce({ name: "ConditionalCheckFailedException" });
 
@@ -97,7 +95,7 @@ describe("CreateTransaction Handler", () => {
   });
 
   test("returns 500 for database error", async () => {
-    (ddbDoc.send as jest.Mock).mockRejectedValueOnce(new Error("DB Error"));
+    (ddbDoc.send as AnyMock).mockRejectedValueOnce(new Error("DB Error"));
 
     const event = {
       body: JSON.stringify({

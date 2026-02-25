@@ -1,19 +1,17 @@
+import { jest } from '@jest/globals';
 import { handler as getHandler } from "../src/handlers/getTransaction/handler";
 import { TransactionStatus, ErrorType } from "../src/shared/types";
-import { ddbDoc } from "../src/shared/clients";
+import * as clients from "../src/shared/clients";
 
-jest.mock("../src/shared/clients", () => ({
-  ddbDoc: {
-    send: jest.fn(),
-  },
-  sqsClient: {
-    send: jest.fn(),
-  },
-}));
+type AnyMock = jest.Mock<any>;
+
+const mockDdbDoc = clients.ddbDoc as jest.Mocked<typeof clients.ddbDoc>;
 
 describe("GetTransaction Handler", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // override send mock
+    (clients.ddbDoc.send as AnyMock) = jest.fn();
   });
 
   test("retrieves transaction successfully", async () => {
@@ -27,7 +25,7 @@ describe("GetTransaction Handler", () => {
       updatedAt: "2024-01-15T10:00:10.000Z",
     };
 
-    (ddbDoc.send as jest.Mock).mockResolvedValueOnce({ Item: mockTransaction });
+    (mockDdbDoc.send as AnyMock).mockResolvedValueOnce({ Item: mockTransaction });
 
     const event = {
       pathParameters: { id: "test-id" },
@@ -41,7 +39,7 @@ describe("GetTransaction Handler", () => {
   });
 
   test("returns 404 for non-existent transaction", async () => {
-    (ddbDoc.send as jest.Mock).mockResolvedValueOnce({ Item: undefined });
+    (mockDdbDoc.send as AnyMock).mockResolvedValueOnce({ Item: undefined });
 
     const event = {
       pathParameters: { id: "non-existent-id" },
@@ -65,7 +63,7 @@ describe("GetTransaction Handler", () => {
   });
 
   test("returns 500 for database error", async () => {
-    (ddbDoc.send as jest.Mock).mockRejectedValueOnce(new Error("DB Error"));
+    (mockDdbDoc.send as AnyMock).mockRejectedValueOnce(new Error("DB Error"));
 
     const event = {
       pathParameters: { id: "test-id" },

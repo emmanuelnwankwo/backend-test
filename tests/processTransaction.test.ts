@@ -1,15 +1,12 @@
+import { jest } from '@jest/globals';
 import { handler as processHandler } from "../src/handlers/processTransaction/handler";
 import { TransactionStatus } from "../src/shared/types";
-import { ddbDoc } from "../src/shared/clients";
+import * as clients from "../src/shared/clients";
 
-jest.mock("../src/shared/clients", () => ({
-  ddbDoc: {
-    send: jest.fn(),
-  },
-  sqsClient: {
-    send: jest.fn(),
-  },
-}));
+type AnyMock = jest.Mock<any>;
+
+
+const mockDdbDoc = clients.ddbDoc as jest.Mocked<typeof clients.ddbDoc>;
 
 describe("ProcessTransaction Handler", () => {
   beforeEach(() => {
@@ -18,6 +15,8 @@ describe("ProcessTransaction Handler", () => {
       cb();
       return {} as any;
     });
+    // override send mock
+    (mockDdbDoc.send as AnyMock) = jest.fn();
   });
 
   afterEach(() => {
@@ -30,10 +29,10 @@ describe("ProcessTransaction Handler", () => {
       status: TransactionStatus.PENDING,
     };
 
-    (ddbDoc.send as jest.Mock)
-      .mockResolvedValueOnce({ Item: mockTransaction }) // GetCommand
-      .mockResolvedValueOnce({}) // UpdateCommand - PROCESSING
-      .mockResolvedValueOnce({}); // UpdateCommand - COMPLETED/FAILED
+    (mockDdbDoc.send as AnyMock)
+      .mockResolvedValueOnce({ Item: mockTransaction })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
 
     const event = {
       Records: [
@@ -44,11 +43,11 @@ describe("ProcessTransaction Handler", () => {
     };
 
     await processHandler(event as any);
-    expect(ddbDoc.send).toHaveBeenCalledTimes(3);
+    expect(mockDdbDoc.send).toHaveBeenCalledTimes(3);
   });
 
   test("skips non-existent transaction", async () => {
-    (ddbDoc.send as jest.Mock).mockResolvedValueOnce({ Item: undefined });
+    (mockDdbDoc.send as AnyMock).mockResolvedValueOnce({ Item: undefined });
 
     const event = {
       Records: [
@@ -59,7 +58,7 @@ describe("ProcessTransaction Handler", () => {
     };
 
     await processHandler(event as any);
-    expect(ddbDoc.send).toHaveBeenCalledTimes(1); // Only GetCommand
+    expect(mockDdbDoc.send).toHaveBeenCalledTimes(1);
   });
 
   test("skips already processed transaction", async () => {
@@ -68,7 +67,7 @@ describe("ProcessTransaction Handler", () => {
       status: TransactionStatus.COMPLETED,
     };
 
-    (ddbDoc.send as jest.Mock).mockResolvedValueOnce({ Item: mockTransaction });
+    (mockDdbDoc.send as AnyMock).mockResolvedValueOnce({ Item: mockTransaction });
 
     const event = {
       Records: [
@@ -79,7 +78,7 @@ describe("ProcessTransaction Handler", () => {
     };
 
     await processHandler(event as any);
-    expect(ddbDoc.send).toHaveBeenCalledTimes(1); // Only GetCommand
+    expect(mockDdbDoc.send).toHaveBeenCalledTimes(1);
   });
 
   test("handles conditional check failure gracefully", async () => {
@@ -88,7 +87,7 @@ describe("ProcessTransaction Handler", () => {
       status: TransactionStatus.PENDING,
     };
 
-    (ddbDoc.send as jest.Mock)
+    (mockDdbDoc.send as AnyMock)
       .mockResolvedValueOnce({ Item: mockTransaction })
       .mockRejectedValueOnce({ name: "ConditionalCheckFailedException" });
 
@@ -101,7 +100,7 @@ describe("ProcessTransaction Handler", () => {
     };
 
     await processHandler(event as any);
-    expect(ddbDoc.send).toHaveBeenCalledTimes(2);
+    expect(mockDdbDoc.send).toHaveBeenCalledTimes(2);
   });
 
   test("processes multiple records", async () => {
@@ -110,7 +109,7 @@ describe("ProcessTransaction Handler", () => {
       status: TransactionStatus.PENDING,
     };
 
-    (ddbDoc.send as jest.Mock)
+    (mockDdbDoc.send as AnyMock)
       .mockResolvedValueOnce({ Item: mockTransaction })
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({})
@@ -126,6 +125,6 @@ describe("ProcessTransaction Handler", () => {
     };
 
     await processHandler(event as any);
-    expect(ddbDoc.send).toHaveBeenCalledTimes(6); // 3 calls per record
+    expect(mockDdbDoc.send).toHaveBeenCalledTimes(6);
   });
 });
